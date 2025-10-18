@@ -15,10 +15,11 @@ class Kind():
     装配体类型类
     凑齐装配所需一组组件视为一个装配体,以[组件1,组件2,...]的形式表示中
     需要构建一个方法用于构建装配体
+    为后续方便处理工件定义为（p,j）意味着每道工序生成的工件对象不同（为后续装配阶段批量不一致进行的统一操作）
     """
 
-    def __init__(self, p):
-        self.kind = p #工件类型 + 产品类型
+    def __init__(self, p,j):
+        self.job = (p,j) #工件对象
         self.job_arrive_list = []  # 已经到达的工件对象列表
         self.job_unprocessed_list = []  # 未加工完成的工件对象列表
 
@@ -32,9 +33,8 @@ class Kind():
 class Tasks(Kind):
     """定义工序o_pj类"""
     def __init__(self, p , j):
-        Kind.__init__(self, p)  #调用父类的构造函数
+        Kind.__init__(self, p , j)  #调用父类的构造函数
         # 基本属性
-        self.task = j  # 所属工序
         self.machine_tuple = None  # 可选加工机器编号
         self.time_remain = None  # 后续剩余处理时间
         # 附加属性
@@ -53,10 +53,10 @@ class Tasks(Kind):
 
 class Job(Kind):
     """部件类"""
-    def __init__(self, p ,n):
-        Kind.__init__(self, p)  # 调用父类的构函
+    def __init__(self, p ,j, n):
+        Kind.__init__(self, p, j)  # 调用父类的构函
         # 基本属性
-        self.number = n  # 该部件的第几个工件
+        self.number = n  # 该部件的第几个部件
         self.time_arrive = None  # 该部件的到达时间
         # 附加属性
         self.task_list = []  # 分配机器的工序对象列表
@@ -64,9 +64,9 @@ class Job(Kind):
 
 class Task(Tasks, Job):
     """工序类"""
-    def __init__(self, p, n, j):
+    def __init__(self, p, j, n):
         Tasks.__init__(self, p, j)  # 调用父类的构函
-        Job.__init__(self, p, n)  # 调用父类构函
+        Job.__init__(self, p, j, n)  # 调用父类构函
         # 附加属性
         self.machine = None  # 选择的机器
         self.time_end = None  # 加工结束时间
@@ -91,10 +91,10 @@ class Machine():
         self.unprocessed_rj_dict = {}  # 未被m加工的各工序类型的工序总数/随着加工过程动态更新
         # 流体附加属性
         self.fluid_kind_task_list = []  # 可选加工工序类型
-        self.time_ratio_rj_dict = {}  # 流体解中分配给各工序类型的时间比例
-        self.fluid_process_rate_rj_dict = {}  # 流体解中加工各工序类型的速率
-        self.fluid_unprocessed_rj_dict = {}  # 未被机器m加工的各工序类型流体总数
-        self.fluid_unprocessed_rj_arrival_dict = {}  # 订单到达时刻未被m加工的各工序类型流体数
+        self.time_ratio_pj_dict = {}  # 流体解中分配给各工序类型的时间比例
+        self.fluid_process_rate_pj_dict = {}  # 流体解中加工各工序类型的速率
+        self.fluid_unprocessed_pj_dict = {}  # 未被机器m加工的各工序类型流体总数
+        self.fluid_unprocessed_pj_arrival_dict = {}  # 订单到达时刻未被m加工的各工序类型流体数
 
 class FAJSP(Instance):
     """柔性装配作业车间调度类"""
@@ -102,11 +102,11 @@ class FAJSP(Instance):
         Instance.__init__(self, M_p, M_a, N)  # 调用父类的构函
         # 实例化工件类型、工件、工序类型、工序和机器对象字典
         self.kind_task_dict = {(p, j): Tasks(p, j) for p in self.kind_tuple for j in self.task_p_dict[p]}  # 工序类型对象字典
-        self.kind_dict = {p: Kind(p) for p in self.kind_tuple}  # 工件类型对象字典
+        self.kind_dict = {p: Kind(p , j) for p in self.kind_tuple for j in self.task_p_dict[p]}  # 工件类型对象字典
         self.machine_dict = {m: Machine(m) for m in self.machine_tuple}  # 机器对象字典
         self.task_dict = {}  # (r,n,j) 工序对象字典 订单到达更新
         self.job_dict = {}  # (r,n)  # 工件对象字典
-        self.process_rate_m_rj_dict = {m: {(p, j): 1 / self.time_mpj_dict[m][(p, j)] for (p, j) in self.kind_task_m_dict[m]} for m in self.machine_tuple}  # 机器加工流体速率
+        self.process_rate_m_pj_dict = {m: {(p, j): 1 / self.time_mpj_dict[m][(p, j)] for (p, j) in self.kind_task_m_dict[m]} for m in self.machine_tuple}  # 机器加工流体速率
         self.reset_parameter()
         self.reset_object()
         print("成功定义FAJSP类")
@@ -137,11 +137,11 @@ class FAJSP(Instance):
                 kind_task_object.fluid_process_rate_m_dict = {}  # 被各机器加工的速率
             for m, machine_object in self.machine_dict.items():
                 machine_object.fluid_kind_task_list = []  # 流体解中可选加工工序类型列表
-                machine_object.time_ratio_rj_dict = {}  # 流体解中分配给各工序类型的时间比例
+                machine_object.time_ratio_pj_dict = {}  # 流体解中分配给各工序类型的时间比例
                 machine_object.fluid_process_rate_rj_dict = {}  # 流体解中加工各工序类型的速率
-                machine_object.unprocessed_rj_dict = {}  # 未被m加工的工序o_rj的总数 (r,j)
-                machine_object.fluid_unprocessed_rj_dict = {}  # 流体解中未被机器m加工的各工序类型总数
-                machine_object.fluid_unprocessed_rj_arrival_dict = {}  # 订单到达时刻未被m加工的各工序类型数量
+                machine_object.unprocessed_pj_dict = {}  # 未被m加工的工序o_pj的总数 (p,j)
+                machine_object.fluid_unprocessed_pj_dict = {}  # 流体解中未被机器m加工的各工序类型总数
+                machine_object.fluid_unprocessed_pj_arrival_dict = {}  # 订单到达时刻未被m加工的各工序类型数量
 
     def reset_object(self):
             """
@@ -149,11 +149,11 @@ class FAJSP(Instance):
             :return: 添加工序对象和机器对象+更新流体模型和属性
             """
             # 初始化工件类型字典、工序类型对象字典、工序对象字典、工件对象字典
-            for p in self.kind_tuple:
+            for (p , j) in self.total_cost_dict.keys():
                 n_start = self.kind_dict[p].number_start #装配过程每次装配，装配体的数量是不同的，而我们的p是产品为索引
-                n_end = n_start + self.kind_number[p]
+                n_end = n_start + self.total_cost_dict[(p,j)]
                 for n in range(n_start, n_end):
-                    job_object = Job(p, n)  # 实例化工件对象
+                    job_object = Job(p,j,n)  # 实例化工件对象
                     job_object.task_list = []
                     job_object.task_unprocessed_list = []
 
@@ -162,7 +162,7 @@ class FAJSP(Instance):
                     self.job_dict[(p, n)] = job_object  # 加入工件字典
                     self.kind_task_dict[(p, 0)].job_now_list.append(job_object)
                     for j in self.task_p_dict[p]:
-                        task_object = Task(p, n, j) #工序对象
+                        task_object = Task(p, j, n) #工序对象
                         job_object.task_unprocessed_list.append(task_object)  # 加入工序未处理工序对象字典
                         self.kind_task_dict[(p, j)].job_unprocessed_list.append(job_object)
                         self.kind_task_dict[(p, j)].task_unprocessed_list.append(task_object)
@@ -194,7 +194,7 @@ class FAJSP(Instance):
                         for (p, j) in self.kind_task_tuple}
         # 各流体初始瞬态数量
         fluid_number_time = {(p, j): self.kind_task_dict[(p, j)].fluid_number for (p, j) in self.kind_task_tuple}
-        process_rate_pj_sum = {(p, j): sum(X[m, (p, j)] * self.process_rate_m_rj_dict[m][(p, j)]
+        process_rate_pj_sum = {(p, j): sum(X[m, (p, j)] * self.process_rate_m_pj_dict[m][(p, j)]
                                            for m in self.machine_pj_dict[(p, j)]) for (p, j) in self.kind_task_tuple}
         # 定义目标函数
         model.maximize(model.min(process_rate_pj_sum[(p, j)] / fluid_number[(p, j)] for (p, j) in self.kind_task_tuple))
@@ -219,7 +219,7 @@ class FAJSP(Instance):
         solution = model.solve()
         x = solution.get_value_dict(X)
         # 输出流体完工时间
-        process_rate_pj_sum = {(p, j): sum(x[m, (p, j)] * self.process_rate_m_rj_dict[m][(p, j)]
+        process_rate_pj_sum = {(p, j): sum(x[m, (p, j)] * self.process_rate_m_pj_dict[m][(p, j)]
                                            for m in self.machine_pj_dict[(p, j)]) for (p, j) in self.kind_task_tuple}
         fluid_completed_time = max(
             fluid_number[(p, j)] / process_rate_pj_sum[(p, j)] for (p, j) in self.kind_task_tuple)
@@ -232,9 +232,9 @@ class FAJSP(Instance):
         for (m, (p, j)), rate in x.items():
             machine_object = self.machine_dict[m]
             kind_task_object = self.kind_task_dict[(p, j)]
-            machine_object.time_ratio_rj_dict[(p, j)] = rate  # 流体解中分配给各工序类型的时间比例
-            kind_task_object.fluid_process_rate_m_dict[m] = rate*self.process_rate_m_rj_dict[m][(p, j)]
-            machine_object.fluid_process_rate_rj_dict[(p, j)] = rate*self.process_rate_m_rj_dict[m][(p, j)]
+            machine_object.time_ratio_pj_dict[(p, j)] = rate  # 流体解中分配给各工序类型的时间比例
+            kind_task_object.fluid_process_rate_m_dict[m] = rate*self.process_rate_m_pj_dict[m][(p, j)]
+            machine_object.fluid_process_rate_pj_dict[(p, j)] = rate*self.process_rate_m_pj_dict[m][(p, j)]
             if rate != 0:
                 machine_object.fluid_kind_task_list.append((p,j))
                 kind_task_object.fluid_machine_list.append(m)
@@ -245,13 +245,13 @@ class FAJSP(Instance):
             for (p, j) in machine_object.kind_task_tuple:  # 添加除流体模型中可选工序类型外的工序
                 kind_task_object = self.kind_task_dict[(p, j)]
                 # 订单到达时刻未被m加工的各工序类型数量
-                machine_object.fluid_unprocessed_rj_arrival_dict[(p, j)] = \
+                machine_object.fluid_unprocessed_pj_arrival_dict[(p, j)] = \
                     kind_task_object.fluid_unprocessed_number_start*\
-                    machine_object.fluid_process_rate_rj_dict[(p, j)]/kind_task_object.fluid_rate_sum
+                    machine_object.fluid_process_rate_pj_dict[(p, j)]/kind_task_object.fluid_rate_sum
                 # 未被m加工的工序o_rj的总数 (r,j)
-                machine_object.unprocessed_rj_dict[(p, j)] = machine_object.fluid_unprocessed_rj_arrival_dict[(p, j)]
+                machine_object.unprocessed_rj_dict[(p, j)] = machine_object.fluid_unprocessed_pj_arrival_dict[(p, j)]
                 # 流体解中未被机器m加工的各工序类型总数
-                machine_object.fluid_unprocessed_rj_dict[(p, j)] = machine_object.fluid_unprocessed_rj_arrival_dict[(p, j)]
+                machine_object.fluid_unprocessed_pj_dict[(p, j)] = machine_object.fluid_unprocessed_pj_arrival_dict[(p, j)]
 
 
 if __name__ == "__main__":

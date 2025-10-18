@@ -150,57 +150,57 @@ if __name__ == '__main__':
         M_p = 10
         M_a = 5
         """写入文件"""
-        num= [i for i in range(10)]
-        for N in num:
-            instance = Instance(M_p, M_a, N)
-            instance.write_file()
+        # num= [i for i in range(10)]
+        # for N in num:
+        #     instance = Instance(M_p, M_a, N)
+        #     instance.write_file()
         """算例信息"""
-        # instance = Instance(M_p, M_a,0)
-        #
-        # print("=== 实例信息 ===")
-        # print("kind_count:", instance.kind_count)
-        # print("product_count:", instance.product_count)
-        # print("process_machine_count:", instance.process_machine_count)
-        # print("assemble_machine_count:", instance.assemble_machine_count)
-        # print("machine_count:", instance.machine_count)
-        # print("kind_tuple:", instance.kind_tuple)
-        #
-        # print("\n=== task_p_dict (任务与工序映射) ===")
-        # print(instance.task_p_dict)  # 例如：{'p0': (0, 1, 2), 'p1': (0, 1, 2), ...} 或者类似
-        #
-        # print("\n=== kind_task_tuple (工序元组) ===")
-        # print(instance.kind_task_tuple)  # 如：(('r0', 0), ('r0', 1), ..., ('p0', 0), ...)
-        #
-        # print("\n=== machine_pj_dict (每个工序可选机器) ===")
-        # print(instance.machine_pj_dict)
-        #
-        # print("\n=== time_pjm_dict (每个工序在各机器上的时间) ===")
-        # print(instance.time_pjm_dict )  # 示例
-        #
-        # print("\n=== time_mpj_dict (每个工序在各机器上的时间) ===")
-        # print(instance.time_mpj_dict)  # 示例
-        #
-        # print("\n=== component_pr_dict (每类产品的组件构成) ===")
-        # print(instance.component_pr_dict)  # 如：{'p0': (0, 1, 2), 'p1': (1, 3), ...}
-        #
-        # print("\n=== assemble_schedule_list (装配顺序) ===")
-        # print(instance.assemble_schedule_list)  # 装配流程列表
-        #
-        # print("\n=== cost_pj_dict (各工序成本) ===")
-        # print(instance.cost_pj_dict)
-        #
-        # print("\n=== count_p_dict (各产品数量) ===")
-        # print(instance.count_p_dict)
-        #
-        #
-        # print("\n=== kind_number (工件和产品数量) ===")
-        # print(instance.kind_number)
-        #
-        # print("\n=== pre_pj_dict (各工序的前置工序) ===")
-        # print(instance.pre_pj_dict)
-        #
-        # print("\n=== total_cost_dict (各工序总成本) ===")
-        # print(instance.total_cost_dict)
-        #
-        # print("\n=== cost_count (前置工序成本) ===")
-        # print(instance.cost_count)
+        instance = Instance(M_p, M_a,0)
+
+        print("=== 实例信息 ===")
+        print("kind_count:", instance.kind_count)
+        print("product_count:", instance.product_count)
+        print("process_machine_count:", instance.process_machine_count)
+        print("assemble_machine_count:", instance.assemble_machine_count)
+        print("machine_count:", instance.machine_count)
+        print("kind_tuple:", instance.kind_tuple)
+
+        print("\n=== task_p_dict (任务与工序映射) ===")
+        print(instance.task_p_dict)  # 例如：{'p0': (0, 1, 2), 'p1': (0, 1, 2), ...} 或者类似
+
+        print("\n=== kind_task_tuple (工序元组) ===")
+        print(instance.kind_task_tuple)  # 如：(('r0', 0), ('r0', 1), ..., ('p0', 0), ...)
+
+        print("\n=== machine_pj_dict (每个工序可选机器) ===")
+        print(instance.machine_pj_dict)
+
+        print("\n=== time_pjm_dict (每个工序在各机器上的时间) ===")
+        print(instance.time_pjm_dict )  # 示例
+
+        print("\n=== time_mpj_dict (每个工序在各机器上的时间) ===")
+        print(instance.time_mpj_dict)  # 示例
+
+        print("\n=== component_pr_dict (每类产品的组件构成) ===")
+        print(instance.component_pr_dict)  # 如：{'p0': (0, 1, 2), 'p1': (1, 3), ...}
+
+        print("\n=== assemble_schedule_list (装配顺序) ===")
+        print(instance.assemble_schedule_list)  # 装配流程列表
+
+        print("\n=== cost_pj_dict (各工序成本) ===")
+        print(instance.cost_pj_dict)
+
+        print("\n=== count_p_dict (各产品数量) ===")
+        print(instance.count_p_dict)
+
+
+        print("\n=== kind_number (工件和产品数量) ===")
+        print(instance.kind_number)
+
+        print("\n=== pre_pj_dict (各工序的前置工序) ===")
+        print(instance.pre_pj_dict)
+
+        print("\n=== total_cost_dict (各工序总成本) ===")
+        print(instance.total_cost_dict)
+
+        print("\n=== cost_count (前置工序成本) ===")
+        print(instance.cost_count)
