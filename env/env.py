@@ -64,19 +64,19 @@ class FAJSP_Environment(FAJSP):
     def state_extract(self):
         """状态提取函数"""
         #初始化状态矩阵
-        proc_rate_matrix = np.zeros((self.machine_count, len(self.kind_task_tuple))) # 实际加工速率矩阵
-        job_flow_matrix = np.zeros((len(self.kind_task_tuple), len(self.kind_task_tuple)))  # 物料工序流矩阵
-        fluid_rate_matrix =  np.zeros((self.machine_count, len(self.kind_task_tuple)))# 流体加工速率矩阵
-        pend_job_matrix = np.zeros((3, len(self.kind_task_tuple)))  # 待加工物料矩阵
+        proc_rate_matrix_old = np.zeros((self.machine_count, len(self.kind_task_tuple))) # 实际加工速率矩阵
+        job_flow_matrix_old = np.zeros((len(self.kind_task_tuple), len(self.kind_task_tuple)))  # 物料工序流矩阵
+        fluid_rate_matrix_old =  np.zeros((self.machine_count, len(self.kind_task_tuple)))# 流体加工速率矩阵
+        pend_job_matrix_old = np.zeros((3, len(self.kind_task_tuple)))  # 待加工物料矩阵
         # #统一矩阵维度88*88
-        # proc_rate_matrix = np.zeros((88,88))
-        # job_flow_matrix = np.zeros((88,88))
-        # fluid_rate_matrix = np.zeros((88,88))
-        # pend_job_matrix = np.zeros((88,88))
+        proc_rate_matrix = np.zeros((88,88))
+        job_flow_matrix = np.zeros((88,88))
+        fluid_rate_matrix = np.zeros((88,88))
+        pend_job_matrix = np.zeros((88,88))
         #静态特征
         for m in self.process_machine_tuple:
             for (p, j) in self.time_mpj_dict[m].keys():
-                proc_rate_matrix[m][self.kind_task_tuple.index((p, j))] = 1/self.time_mpj_dict[m][(p, j)]
+                proc_rate_matrix_old[m][self.kind_task_tuple.index((p, j))] = 1/self.time_mpj_dict[m][(p, j)]
 
         for j_pre in self.kind_task_tuple:
             for j_cur in self.kind_task_tuple:
@@ -84,27 +84,27 @@ class FAJSP_Environment(FAJSP):
                     idx_j_pre = self.kind_task_tuple.index(j_pre)
                     idx_j_cur = self.kind_task_tuple.index(j_cur)
                     idx_j_pre_cost = self.pre_pj_dict[j_cur].index(j_pre)
-                    job_flow_matrix[idx_j_pre][idx_j_cur] = self.cost_pj_dict[j_cur][idx_j_pre_cost ]
+                    job_flow_matrix_old[idx_j_pre][idx_j_cur] = self.cost_pj_dict[j_cur][idx_j_pre_cost ]
 
         # 基于流体模型在线计算的动态特征
         for (m,(p,j)),rate in self.fluid_solution.items():
             idx = self.kind_task_tuple.index((p, j))
-            fluid_rate_matrix[m][idx] = rate
+            fluid_rate_matrix_old[m][idx] = rate
 
         # 待处理物料矩阵
         for (p, j) in self.kind_task_tuple:
             idx = self.kind_task_tuple.index((p, j))
             part_object = self.part_dict[idx]
 
-            pend_job_matrix[0][idx] = self.total_cost_dict[(p, j)]  # 初始各工序待加工数量
-            pend_job_matrix[1][idx] = len(part_object.part_unprocessed_list)  # 当前未处理工序数
-            pend_job_matrix[2][idx] = part_object.fluid_unprocessed_number  # 流体模型中未处理数量
+            pend_job_matrix_old[0][idx] = self.total_cost_dict[(p, j)]  # 初始各工序待加工数量
+            pend_job_matrix_old[1][idx] = len(part_object.part_unprocessed_list)  # 当前未处理工序数
+            pend_job_matrix_old[2][idx] = part_object.fluid_unprocessed_number  # 流体模型中未处理数量
         # print(pend_job_matrix)
         #
-        # proc_rate_matrix[:proc_rate_matrix_old.shape[0], :proc_rate_matrix_old.shape[1]] = proc_rate_matrix_old
-        # job_flow_matrix[:job_flow_matrix_old.shape[0], :job_flow_matrix_old.shape[1]] = job_flow_matrix_old
-        # fluid_rate_matrix[:fluid_rate_matrix_old.shape[0], :fluid_rate_matrix_old.shape[1]] = fluid_rate_matrix_old
-        # pend_job_matrix[:pend_job_matrix_old.shape[0], :pend_job_matrix_old.shape[1]] = pend_job_matrix_old
+        proc_rate_matrix[:proc_rate_matrix_old.shape[0], :proc_rate_matrix_old.shape[1]] = proc_rate_matrix_old
+        job_flow_matrix[:job_flow_matrix_old.shape[0], :job_flow_matrix_old.shape[1]] = job_flow_matrix_old
+        fluid_rate_matrix[:fluid_rate_matrix_old.shape[0], :fluid_rate_matrix_old.shape[1]] = fluid_rate_matrix_old
+        pend_job_matrix[:pend_job_matrix_old.shape[0], :pend_job_matrix_old.shape[1]] = pend_job_matrix_old
 
         return [proc_rate_matrix, job_flow_matrix, fluid_rate_matrix, pend_job_matrix]
 
