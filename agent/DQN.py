@@ -311,8 +311,7 @@ class DQNTrainer:
                 next_candidate_actions, next_candidate_actions_features  # 新增参数
             )
 
-            # 训练
-            loss = self.agent.train_step()
+
 
             state = next_state
             total_reward += reward
@@ -320,7 +319,8 @@ class DQNTrainer:
             if done:
                 break
 
-
+        # 训练
+        loss = self.agent.train_step()
 
         self.agent.decay_epsilon()
         # 记录数据

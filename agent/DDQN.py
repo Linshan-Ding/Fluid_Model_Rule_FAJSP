@@ -321,15 +321,14 @@ class DDQNTrainer:
                 next_candidate_actions, next_candidate_actions_features  # 新增参数
             )
 
-            # 训练
-            loss = self.agent.train_step()
 
             state = next_state
             total_reward += reward
 
             if done:
                 break
-
+        # 训练
+        loss = self.agent.train_step()
         # 记录本周期的决策时间
         self.decision_times.extend(episode_decision_times)
 
