@@ -5,6 +5,10 @@
 网络结构与超参数与agent/PPO.py完全一致(CNN状态特征 + 自注意力动作特征 + MLP打分,
 lr_policy=3e-4, lr_value=1e-4, gamma=0.99, eps_clip=0.2, K_epochs=10, batch_size=64),
 仅移除visdom/matplotlib依赖, 并支持向环境传入OOD算例的分布参数。
+
+训练方式为"顺序轮询": 一个共享的策略/价值网络在D1-D12上循环训练, 每个episode
+按顺序切换到下一个算例(状态矩阵统一padding到88x88、动作特征维度一致,
+因此单一网络可跨算例共享参数)。episode执行逻辑见run_episode()。
 """
 import os
 import sys
@@ -200,81 +204,56 @@ class PPO:
         return np.mean(policy_losses), np.mean(value_losses)
 
 
-class InstanceTrainer:
-    """单个算例的无头训练器"""
+def build_shared_agent(env, **ppo_kwargs):
+    """基于任一环境推断网络维度并构建共享PPO agent。
 
-    def __init__(self, name, env_kwargs):
-        self.name = name
-        self.env_kwargs = dict(env_kwargs)
-        self.env = FAJSP_Environment(**env_kwargs)
-        self.env.reset()
+    状态矩阵统一padding到88x88, 动作特征维度对所有算例一致,
+    因此由单个环境推断的维度对全部算例有效。
+    """
+    env.reset()
+    ca = env.get_candidate_actions()
+    if len(ca) == 0:
+        raise ValueError("没有候选动作, 无法推断网络维度")
+    caf = env.action_features(ca[0])
+    feature_dim = len(caf[ca[0]])
 
-        ca = self.env.get_candidate_actions()
-        if len(ca) == 0:
-            raise ValueError(f"{name}: 没有候选动作")
-        caf = self.env.action_features(ca[0])
-        feature_dim = len(caf[ca[0]])
+    cnn = CNNFeatureExtractor(input_channels=1).to(device)
+    feats = []
+    for m in env.current_state:
+        t = torch.tensor(m).unsqueeze(0).unsqueeze(0).float().to(device)
+        feats.append(cnn(t))
+    state_dim = torch.cat(feats, dim=1).shape[1]
 
-        cnn = CNNFeatureExtractor(input_channels=1).to(device)
-        feats = []
-        for m in self.env.current_state:
-            t = torch.tensor(m).unsqueeze(0).unsqueeze(0).float().to(device)
-            feats.append(cnn(t))
-        state_dim = torch.cat(feats, dim=1).shape[1]
+    return PPO(action_feature_dim=feature_dim,
+               combined_dim=state_dim + feature_dim,
+               mlp_value_dim=state_dim, **ppo_kwargs)
 
-        self.agent = PPO(action_feature_dim=feature_dim,
-                         combined_dim=state_dim + feature_dim,
-                         mlp_value_dim=state_dim)
 
-        self.episode_rewards = []
-        self.completion_times = []
-        self.episode_count = 0
-        self.best_completion_time = float('inf')
-        self.best_schedule_log = None
+def run_episode(agent, env):
+    """用共享agent在指定环境上训练一个episode并执行PPO更新。
 
-    def train_one_episode(self):
-        self.env.reset()
-        state = self.env.current_state
-        total_reward = 0
-        while True:
-            candidate_actions = self.env.get_candidate_actions()
-            if not candidate_actions:
-                break
-            candidate_actions_features = {
-                a: self.env.action_features(a)[a] for a in candidate_actions
-            }
-            action, logp, _, act_feat = self.agent.select_action(
-                state, candidate_actions, candidate_actions_features)
-            next_state, reward, done = self.env.step(action)
-            self.agent.store_transition(state, action, logp, reward, next_state, done,
-                                        act_feat, candidate_actions, candidate_actions_features)
-            state = next_state
-            total_reward += reward
-            if done:
-                break
+    返回 (total_reward, completion_time, policy_loss, value_loss, schedule_log)。
+    """
+    env.reset()
+    state = env.current_state
+    total_reward = 0
+    while True:
+        candidate_actions = env.get_candidate_actions()
+        if not candidate_actions:
+            break
+        candidate_actions_features = {
+            a: env.action_features(a)[a] for a in candidate_actions
+        }
+        action, logp, _, act_feat = agent.select_action(
+            state, candidate_actions, candidate_actions_features)
+        next_state, reward, done = env.step(action)
+        agent.store_transition(state, action, logp, reward, next_state, done,
+                               act_feat, candidate_actions, candidate_actions_features)
+        state = next_state
+        total_reward += reward
+        if done:
+            break
 
-        pol_loss, val_loss = self.agent.update()
-
-        current_ct = float(self.env.completion_time)
-        self.episode_rewards.append(total_reward)
-        self.completion_times.append(current_ct)
-        if current_ct < self.best_completion_time:
-            self.best_completion_time = current_ct
-            self.best_schedule_log = copy.deepcopy(getattr(self.env, "schedule_log", []))
-            self.agent.update_best_params(current_ct)
-        self.episode_count += 1
-        return total_reward, current_ct, pol_loss, val_loss
-
-    def save_model(self, out_dir):
-        path = os.path.join(out_dir, f"ppo_ood_{self.name}.pth")
-        torch.save({
-            'name': self.name,
-            'env_kwargs': self.env_kwargs,
-            'policy': self.agent.best_policy_state,
-            'value': self.agent.best_value_state,
-            'reward': self.episode_rewards,
-            'completion_times': self.completion_times,
-            'best_completion_time': self.agent.best_completion_time,
-            'best_schedule_log': self.best_schedule_log,
-        }, path)
-        return path
+    pol_loss, val_loss = agent.update()
+    schedule_log = copy.deepcopy(getattr(env, "schedule_log", []))
+    return total_reward, float(env.completion_time), pol_loss, val_loss, schedule_log
