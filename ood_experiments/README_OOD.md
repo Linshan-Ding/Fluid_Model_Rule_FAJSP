@@ -18,62 +18,61 @@
 默认值与原实现完全一致，C1-C27不受影响。
 算例配置定义在 `configs.py`，数据文件在 `data/D*/`。
 
-## 训练方式：顺序轮询 + 共享网络
+## 评测协议（主流程）：预训练策略best-of-9，零重训
 
-单一共享的策略/价值网络（结构与超参数与`agent/PPO.py`一致），
-全局共训练 **1200个episode**，每个episode按 D1→D2→...→D12→D1→... 的顺序
-切换到下一个算例（每个算例各分得100个episode）。
-状态矩阵统一padding到88×88、动作特征维度一致（178维），
-因此单一网络可跨算例共享参数——这也是原仓库统一状态矩阵维度的设计意图。
-
-最终结果 = 每个算例**最后阶段收敛窗口**（默认最后20%的episode，至少30个）
-内的最小完工时间，同时报告窗口均值/标准差以反映收敛稳定性。
-
-## 依赖
+`models/` 下是论文中在C10-C18九个中等规模算例上训练完毕的9组策略网络参数
+（结构为论文配置：CNN卷积核[64,32]、MLP隐层[64,32]、自注意力178维）。
+OOD评测**不做任何重训或微调**：将9个预训练策略逐一用于每个D算例的贪婪调度
+（每个算例仅按标准推理流程重解一次流体LP），每个算例得到9个makespan，
+**取最优值作为FNIRL的结果**。
 
 ```bash
 pip install numpy scipy torch
-```
-无CPLEX环境下流体LP自动切换到scipy/HiGHS后端（`Class_FAJSP/fluid_lp.py`，模型与docplex等价）。
 
-## 运行步骤
-
-```bash
-# 1. 生成算例 + 求流体下界 + 跑5条PDR取最优 (几分钟)
+# 1. 流体下界 + 5条PDR取最优（结果已随仓库附带: results/lb_pdr.csv）
 python ood_experiments/run_lb_pdr.py
-#    → results/lb_pdr.csv (本仓库已附带实测结果), 算例数据写入 data/D*/
 
-# 2. 顺序轮询训练 (共1200个episode, 每episode切换下一个算例)
-python ood_experiments/run_training.py --total-episodes 1200
-#    → results/train_curves.csv   逐episode追加(global_episode/instance/episode/makespan/...)
-#    → results/ppo_ood_shared.pth 共享模型断点(默认每12个episode保存)
-#    中断后可断点续训:  python ood_experiments/run_training.py --resume
-#    随时安全终止:      创建 ood_experiments/STOP.txt
-#    只训练部分算例:    --instances D1,D2,D3
-
-# 3. 汇总: 收敛窗口统计 + vs最优PDR改进% + vs流体下界gap%
-python ood_experiments/collect_results.py
-#    → results/final_table.csv / final_table.md
+# 2. 加载9个预训练模型求解D1-D12, best-of-9作为FNIRL结果
+python ood_experiments/run_eval_pretrained.py
+#    → results/eval_pretrained.csv          每个(算例,模型)的makespan与决策时间
+#    → results/final_table_pretrained.csv   论文表格数据(见下方列对应)
 ```
 
-## 计算量提示
+`pretrained.py` 按checkpoint的state_dict形状动态重建网络结构，
+不依赖 `agent/CNN.py` 等文件的当前实现（当前为精简版，与训练时结构不同）。
 
-单episode耗时与算例总工件数近似成正比（4核CPU上D1约16-20s/episode）。
-D4-D6因消耗系数在装配链上乘性传播，总工件数达1212/2424/3636，
-是训练耗时的大头，建议在GPU/多核机器上运行完整的1200个episode。
+无CPLEX环境下流体LP自动切换到scipy/HiGHS后端
+（`Class_FAJSP/fluid_lp.py`，模型与docplex等价）。
 
 ## 结果与论文表格的对应关系
 
-`results/final_table.csv` 各列对应论文表 "Generalization under distributional shifts"：
+`results/final_table_pretrained.csv` 各列对应论文表
+"Generalization under distributional shifts"：
 
 | CSV列 | 论文表列 |
 |---|---|
 | `fluid_lb` | Fluid LB（流体下界，逐算例重解LP得到） |
-| `fnirl_final` | FNIRL（收敛窗口最小完工时间） |
-| `window_mean` / `window_std` | 收敛稳定性（正文引用） |
+| `fnirl_best_of_9` | FNIRL（9个预训练策略的最优makespan） |
+| `best_model` | 取得最优值的预训练模型（附录/正文可引用） |
+| `avg_decision_ms` | 平均每步决策时间 |
 | `best_pdr` / `best_rule` | Best PDR（5条规则逐算例取最优） |
 | `impr_vs_pdr_pct` | 正文引用的对最优PDR改进百分比 |
 | `gap_to_lb_pct` | 正文引用的对流体下界gap百分比 |
 
-DRLG基线如需对比，可按`ppo_headless.py`的模式将`agent/A3C.py`改造为无头版本，
-用相同的顺序轮询协议训练。
+## 备选流程：顺序轮询训练（从头训练）
+
+如需在D组上从头训练（而非零重训迁移评测），保留了顺序轮询训练流程：
+单一共享策略网络，全局1200个episode，每个episode按D1→...→D12顺序切换算例。
+
+```bash
+python ood_experiments/run_training.py --total-episodes 1200   # 断点续训: --resume
+python ood_experiments/collect_results.py                      # 收敛窗口统计
+```
+
+注意：`run_training.py` 使用 `agent/` 目录当前的精简网络组件，
+与 `models/` 下checkpoint的结构不同，二者的模型文件不可互换。
+
+## 计算量提示
+
+贪婪评测的耗时与算例总工件数成正比。D4-D6因消耗系数在装配链上乘性传播，
+总工件数达1212/2424/3636，占评测总耗时的大头（完整best-of-9评测约1-1.5小时，4核CPU）。

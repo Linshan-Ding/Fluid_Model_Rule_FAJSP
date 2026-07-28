@@ -25,6 +25,12 @@ agent/
 schedule_rule/
   schedule_rule.py       优先调度规则（SPT/FIFO/MRT/MRT_SPT/MRT_FIFO等）
 ood_experiments/         OOD分布偏移泛化实验（论文6.10节, 见README_OOD.md）
+  pretrained.py            预训练checkpoint加载(按state_dict形状动态重建网络)
+  run_eval_pretrained.py   9个预训练策略求解D1-D12, best-of-9作为FNIRL结果
+  run_lb_pdr.py            流体下界 + 5条PDR取最优
+  run_training.py          备选: D组从头顺序轮询训练
+models/
+  ppo_fajsp_model_8_4_*.pth  论文C10-C18九个中等规模算例训练完毕的策略网络参数
 data/
   4_2_* 8_4_* 12_6_*     C1-C27基准算例（命名: Mp_Ma_P_R_Jr_Np）
   D1_* ... D12_*         D1-D12分布偏移算例
@@ -52,16 +58,19 @@ python agent/PPO.py                         # PPO训练（需先启动 python -m
 
 ### 2. D1-D12 OOD泛化实验（论文修订新增）
 
+评测协议: 加载`models/`下9个预训练策略(C10-C18训练所得)直接求解每个D算例,
+**零重训**, 每个算例取9个结果中的最优值作为FNIRL结果。
+
 ```bash
 # 流体下界 + 5条PDR取最优（结果已随仓库提供: ood_experiments/results/lb_pdr.csv）
 python ood_experiments/run_lb_pdr.py
 
-# 顺序轮询训练: 共享策略网络, 共1200个episode, 每个episode切换到下一个算例
-python ood_experiments/run_training.py --total-episodes 1200
-
-# 汇总生成论文表格数据
-python ood_experiments/collect_results.py
+# 预训练策略best-of-9评测, 直接生成论文表格数据
+python ood_experiments/run_eval_pretrained.py
+#   → ood_experiments/results/final_table_pretrained.csv
 ```
 
-详细说明（算例设计、断点续训、结果与论文表格的对应关系）见
+备选(从头训练): `python ood_experiments/run_training.py --total-episodes 1200`
+
+详细说明（算例设计、评测协议、结果与论文表格的列对应）见
 [`ood_experiments/README_OOD.md`](ood_experiments/README_OOD.md)。
