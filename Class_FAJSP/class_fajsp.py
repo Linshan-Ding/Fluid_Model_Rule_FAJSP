@@ -1,4 +1,8 @@
-from docplex.mp.model import Model
+try:
+    from docplex.mp.model import Model
+    HAS_DOCPLEX = True
+except ImportError:  # 云端环境无CPLEX时回退到scipy/HiGHS后端(fluid_lp.py, 模型等价)
+    HAS_DOCPLEX = False
 from .Instance_generate import Instance
 # from .medium_scale_Instance_generate import Instance
 # from .large_scale_Instance_generate import Instance
@@ -172,31 +176,40 @@ class FAJSP(Instance):
     def fluid_model(self):
         """
         最小化最大完工时间目标流体模型求解
+        （有CPLEX时使用docplex, 否则使用scipy/HiGHS后端, 两者模型等价）
         """
-        # 初始化模型对象
-        model = Model('LP')
-        # 定义决策变量
-        var_list = {(m, (v, j)) for m in self.machine_tuple for (v, j) in self.kind_task_m_dict[m]}
-        X = model.continuous_var_dict(var_list, lb=0, ub=1, name='X')
         # 各流体初始未加工数量
         fluid_number = {(v,j):self.part_dict[self.kind_task_tuple.index((v,j))].fluid_unprocessed_number for (v,j) in self.kind_task_tuple}
         # 各流体初始瞬态数量
         fluid_number_time = {(v, j): self.part_dict[self.kind_task_tuple.index((v,j))].fluid_number for (v,j) in self.kind_task_tuple}
-        process_rate_part_sum = {(v, j): sum(X[m, (v, j)] * self.process_rate_m_part_dict[m][(v, j)]
-                                           for m in self.machine_pj_dict[(v, j)]) for (v, j) in self.kind_task_tuple}
-        # 定义目标函数
-        model.maximize(model.min(process_rate_part_sum[(v, j)] / fluid_number[(v, j)] for (v, j) in self.kind_task_tuple))
-        # 机器利用率约束
-        model.add_constraints(model.sum(X[m, (v, j)] for (v, j) in self.kind_task_m_dict[m]) <= 1
-                                  for m in self.machine_tuple)
-        # 解的可行性约束 (V,J)表示当前工序， (v,j)表示前置工序
-        for (V, J) in self.kind_task_tuple:
-            if fluid_number_time[(V, J)] == 0 and self.pre_pj_dict[(V, J)]:
-                for (v, j) in self.pre_pj_dict[(V, J)]:
-                    model.add_constraint(process_rate_part_sum[(v, j)] >= process_rate_part_sum[(V, J)])
-        # 求解模型
-        solution = model.solve()
-        x = solution.get_value_dict(X)
+
+        if HAS_DOCPLEX:
+            # 初始化模型对象
+            model = Model('LP')
+            # 定义决策变量
+            var_list = {(m, (v, j)) for m in self.machine_tuple for (v, j) in self.kind_task_m_dict[m]}
+            X = model.continuous_var_dict(var_list, lb=0, ub=1, name='X')
+            process_rate_part_sum = {(v, j): sum(X[m, (v, j)] * self.process_rate_m_part_dict[m][(v, j)]
+                                               for m in self.machine_pj_dict[(v, j)]) for (v, j) in self.kind_task_tuple}
+            # 定义目标函数
+            model.maximize(model.min(process_rate_part_sum[(v, j)] / fluid_number[(v, j)] for (v, j) in self.kind_task_tuple))
+            # 机器利用率约束
+            model.add_constraints(model.sum(X[m, (v, j)] for (v, j) in self.kind_task_m_dict[m]) <= 1
+                                      for m in self.machine_tuple)
+            # 解的可行性约束 (V,J)表示当前工序， (v,j)表示前置工序
+            for (V, J) in self.kind_task_tuple:
+                if fluid_number_time[(V, J)] == 0 and self.pre_pj_dict[(V, J)]:
+                    for (v, j) in self.pre_pj_dict[(V, J)]:
+                        model.add_constraint(process_rate_part_sum[(v, j)] >= process_rate_part_sum[(V, J)])
+            # 求解模型
+            solution = model.solve()
+            x = solution.get_value_dict(X)
+        else:
+            from .fluid_lp import solve_fluid_lp
+            x = solve_fluid_lp(self.machine_tuple, self.kind_task_tuple, self.kind_task_m_dict,
+                               self.machine_pj_dict, self.process_rate_m_part_dict,
+                               fluid_number, fluid_number_time, self.pre_pj_dict)
+
         # 输出流体完工时间
         process_rate_pj_sum = {(v, j): sum(x[m, (v, j)] * self.process_rate_m_part_dict[m][(v, j)]
                                            for m in self.machine_pj_dict[(v, j)]) for (v, j) in self.kind_task_tuple}

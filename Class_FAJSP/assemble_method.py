@@ -137,14 +137,14 @@ def process_dicts(cost_dict, p_dict):
 
 
 """为每个产品分配工件"""
-def allocation_no_duplicates(source, targets):
+def allocation_no_duplicates(source, targets, num_range=(3, 4)):
     component_dict = {}
     source_list = list(source)
     used_elements = set()  # 用于跟踪已使用的元素
 
     for t in targets:
-        # 随机分配3-4个元素
-        num_elements = randint(3, 4)
+        # 随机分配num_range个元素（默认3-4个，三层BOM模式固定4个）
+        num_elements = randint(*num_range)
         selected_elements = []
 
         # 优先选择未使用的元素
