@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.idea/
+ood_experiments/STOP.txt
+ood_experiments/results/train_log.txt

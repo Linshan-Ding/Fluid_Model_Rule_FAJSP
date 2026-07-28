@@ -7,9 +7,26 @@ from Class_FAJSP import assemble_method as am
 
 """实例类"""
 class Instance():
-    def __init__(self, M_p=None,M_a=None,product_count = None,kind_count = None,J_r = None ,N_p = None):
-        seed(0)  # 固定随机种子
-        np.random.seed(0)
+    def __init__(self, M_p=None,M_a=None,product_count = None,kind_count = None,J_r = None ,N_p = None,
+                 pt_range=(10, 20), alpha_range=(1, 2), elig_mode='base', bom_mode='base',
+                 rng_seed=0, instance_name=None):
+        """
+        分布参数（默认值与原始实现完全一致，用于OOD泛化实验时可覆盖）：
+        pt_range: 工序加工时间区间，默认U[10,20]；Shift-PT实验使用(10,50)
+        alpha_range: 装配消耗系数区间，默认U[1,2]；Shift-alpha实验使用(1,5)
+        elig_mode: 机器可选模式，'base'=U[1,M]随机；'sparse'=U[1,2]稀疏；'dense'=全部同类机器可选
+        bom_mode: BOM结构模式，'base'=随机装配序列；'three_level'=强制三层结构
+                  （每产品固定4个组件，先装配为2个子装配体，再总装为成品）
+        rng_seed: 随机种子（默认0，与原实现一致）
+        instance_name: 算例文件夹名（默认按参数拼接，与原实现一致）
+        """
+        seed(rng_seed)  # 固定随机种子
+        np.random.seed(rng_seed)
+        self.pt_range = tuple(pt_range)
+        self.alpha_range = tuple(alpha_range)
+        self.elig_mode = elig_mode
+        self.bom_mode = bom_mode
+        self.rng_seed = rng_seed
         self.M_p = M_p
         self.M_a = M_a
         self.process_machine_count = M_p # 加工机器数
@@ -26,7 +43,7 @@ class Instance():
         self.product_tuple = tuple( p for p in range(self.kind_count,self.kind_count+self.product_count)) # 产品元组
         self.kind_tuple = self.kind_r_tuple + self.product_tuple # 工件类型及产品类型元组
 
-        self.file_name = str(M_p) + '_' + str(M_a)+ '_'+ str(self.product_count)+'_'+str(self.kind_count) +'_'+str(self.J_r) +'_'+str(self.N_p) # 算例文件夹名
+        self.file_name = instance_name if instance_name else (str(M_p) + '_' + str(M_a)+ '_'+ str(self.product_count)+'_'+str(self.kind_count) +'_'+str(self.J_r) +'_'+str(self.N_p)) # 算例文件夹名
 
         (self.task_p_dict, self.kind_task_tuple,self.kind_task_tuple_r, self.kind_task_tuple_a,self.machine_pj_dict, self.time_pjm_dict,self.kind_task_m_dict,self.time_mpj_dict, self.time_pj_dict,
         self.component_pr_dict,self.assemble_schedule_list,self.cost_pj_dict,self.count_p_dict,self.cost_aj_dict,
@@ -51,18 +68,32 @@ class Instance():
     """装配耗材"""
     @property
     def assemble_consumption(self):
-        return [randint(1, 2), randint(1, 2)]
+        return [randint(*self.alpha_range), randint(*self.alpha_range)]
 
     """工序在可选机器上的加工时间"""
     def random_t_pjm(self) :
-        return randint(10,20 )
+        return randint(*self.pt_range)
+
+    def elig_count(self, machine_count):
+        """按可选模式确定每道工序的可选机器数"""
+        if self.elig_mode == 'sparse':
+            return randint(1, min(2, machine_count))
+        if self.elig_mode == 'dense':
+            return machine_count
+        return randint(1, machine_count)
 
     def information(self):
         """生成所有产品信息"""
-        # 每类产品的组件
-        component_pr_dict= am.allocation_no_duplicates(self.kind_r_tuple, self.product_tuple)
-        #每类产品的装配顺序
-        assemble_schedule_list = {p: am.assemble_schedule(len(component_pr_dict[p])) for p in self.product_tuple}
+        if self.bom_mode == 'three_level':
+            # 三层BOM：每产品固定4个组件，装配序列强制为[2,2,0]
+            # 即组件0,1装配为子装配体(p,0)，组件2,3装配为子装配体(p,1)，(p,2)总装
+            component_pr_dict = am.allocation_no_duplicates(self.kind_r_tuple, self.product_tuple, num_range=(4, 4))
+            assemble_schedule_list = {p: [2, 2, 0] for p in self.product_tuple}
+        else:
+            # 每类产品的组件
+            component_pr_dict= am.allocation_no_duplicates(self.kind_r_tuple, self.product_tuple)
+            #每类产品的装配顺序
+            assemble_schedule_list = {p: am.assemble_schedule(len(component_pr_dict[p])) for p in self.product_tuple}
         # 产品和工件对应工序元组
         task_r_dict = {r: tuple(j for j in range(self.J_r)) for r in self.kind_r_tuple}
         task_a_dict = {p: tuple(j for j in range(len(assemble_schedule_list[p]))) for p in self.product_tuple}
@@ -72,8 +103,8 @@ class Instance():
         kind_task_tuple_a = tuple((p,j) for p in self.product_tuple for j in task_a_dict[p])
         kind_task_tuple = tuple((p,j) for p in self.kind_tuple for j in task_p_dict[p])
         # 工序在可选机器 - 使用原生Python整数
-        machine_rj_dict = {(r, j): tuple(int(m) for m in np.random.choice(self.process_machine_tuple, randint(1, self.process_machine_count), replace=False)) for (r, j) in kind_task_tuple_r }
-        machine_aj_dict = {(a, j): tuple(int(m) for m in np.random.choice(self.assemble_machine_tuple, randint(1, self.assemble_machine_count), replace=False)) for (a, j) in kind_task_tuple_a }
+        machine_rj_dict = {(r, j): tuple(int(m) for m in np.random.choice(self.process_machine_tuple, self.elig_count(self.process_machine_count), replace=False)) for (r, j) in kind_task_tuple_r }
+        machine_aj_dict = {(a, j): tuple(int(m) for m in np.random.choice(self.assemble_machine_tuple, self.elig_count(self.assemble_machine_count), replace=False)) for (a, j) in kind_task_tuple_a }
         machine_pj_dict = {**machine_aj_dict,**machine_rj_dict}
         # 工序在可选机器上的加工时间 - 使用原生Python整数
         time_pjm_dict = {(p,j): {int(m): self.random_t_pjm() for m in machine_pj_dict[(p,j)]} for (p,j) in kind_task_tuple}
