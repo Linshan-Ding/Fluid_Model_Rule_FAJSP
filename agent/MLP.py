@@ -8,15 +8,13 @@ class MLP(nn.Module):
 
         self.network = nn.Sequential(
 
-            nn.Linear(input_dim, 16),
+            nn.Linear(input_dim, 64),
             nn.ReLU(),
-            # nn.Dropout(0.2),
-            #
-            # nn.Linear(64, 32),
-            # nn.ReLU(),
-            # nn.Dropout(0.2),
 
-            nn.Linear(16, 1)
+            nn.Linear(64, 32),
+            nn.ReLU(),
+
+            nn.Linear(32, 1)
         )
 
     def forward(self, x):

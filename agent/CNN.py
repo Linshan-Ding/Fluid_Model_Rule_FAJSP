@@ -12,14 +12,11 @@ class CNNFeatureExtractor(nn.Module):
 
         # 卷积层序列
         self.conv_layers = nn.Sequential(
-            nn.Conv2d(input_channels, 16, kernel_size=2,padding=1),
+            nn.Conv2d(input_channels, 64, kernel_size=2,padding=1),
             nn.ReLU(),
-            # nn.Conv2d(64, 32, kernel_size=2, padding=1),
-            # nn.ReLU(),
-            # nn.MaxPool2d(2),
-            # nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            # nn.ReLU(),
-            # nn.MaxPool2d(2),
+            nn.Conv2d(64, 32, kernel_size=2, padding=1),
+            nn.ReLU(),
+
             # 全局池化
             nn.AdaptiveAvgPool2d((2, 2))  # 统一到 2×2
         )
