@@ -92,7 +92,7 @@ class ValueNetwork(nn.Module):
 class PPO:
     def __init__(self, action_feature_dim, combined_dim, mlp_value_dim,
                  lr_policy=3e-4, lr_value=3e-4, gamma=1,
-                 eps_clip=0.2, K_epochs=5, batch_size=64):
+                 eps_clip=0.2, K_epochs=4, batch_size=32):
 
         self.gamma = gamma
         self.eps_clip = eps_clip
