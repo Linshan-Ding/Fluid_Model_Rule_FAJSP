@@ -68,11 +68,11 @@ class FAJSP_Environment(FAJSP):
         job_flow_matrix_old = np.zeros((len(self.kind_task_tuple), len(self.kind_task_tuple)))  # 物料工序流矩阵
         fluid_rate_matrix_old =  np.zeros((self.machine_count, len(self.kind_task_tuple)))# 流体加工速率矩阵
         pend_job_matrix_old = np.zeros((3, len(self.kind_task_tuple)))  # 待加工物料矩阵
-        # #统一矩阵维度88*88
-        proc_rate_matrix = np.zeros((88,88))
-        job_flow_matrix = np.zeros((88,88))
-        fluid_rate_matrix = np.zeros((88,88))
-        pend_job_matrix = np.zeros((88,88))
+        # #统一矩阵维度
+        proc_rate_matrix = np.zeros((185,185))
+        job_flow_matrix = np.zeros((185,185))
+        fluid_rate_matrix = np.zeros((185,185))
+        pend_job_matrix = np.zeros((185,185))
         #静态特征
         for m in self.process_machine_tuple:
             for (p, j) in self.time_mpj_dict[m].keys():
