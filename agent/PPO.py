@@ -3,9 +3,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from CNN import CNNFeatureExtractor
-from ATN import SelfAttention
-from MLP import MLP
+from .CNN import CNNFeatureExtractor
+from .ATN import SelfAttention
+from .MLP import MLP
 from env.env import FAJSP_Environment
 import numpy as np
 import random
@@ -94,6 +94,9 @@ class PPO:
                  lr_policy=3e-4, lr_value=3e-4, gamma=1,
                  eps_clip=0.2, K_epochs=4, batch_size=32):
 
+        # 共享模型输入维度，用于多算例一致性检查。
+        self.action_feature_dim = action_feature_dim
+        self.state_feature_dim = mlp_value_dim
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
@@ -294,7 +297,7 @@ class PPO:
 # 单个算例的训练器
 #########################################################
 class InstanceTrainer:
-    def __init__(self, data_config, viz_windows):
+    def __init__(self, data_config, viz_windows, shared_agent=None):
         self.data_config = data_config
         self.config_str = f"{data_config[0]}_{data_config[1]}_{data_config[2]}_{data_config[3]}_{data_config[4]}_{data_config[5]}"
         self.viz_windows = viz_windows
@@ -328,12 +331,23 @@ class InstanceTrainer:
         sf = torch.cat(feats, dim=1)
         state_dim = sf.shape[1]
 
-        # 创建PPO Agent
-        self.agent = PPO(
-            action_feature_dim=feature_dim,
-            combined_dim=state_dim + feature_dim,
-            mlp_value_dim=state_dim
-        )
+        # 第一个 Trainer 创建 PPO；之后所有 Trainer 共用同一 PPO 对象。
+        if shared_agent is None:
+            self.agent = PPO(
+                action_feature_dim=feature_dim,
+                combined_dim=state_dim + feature_dim,
+                mlp_value_dim=state_dim
+            )
+        else:
+            if (shared_agent.action_feature_dim != feature_dim or
+                    shared_agent.state_feature_dim != state_dim):
+                raise ValueError(
+                    f"{self.config_str} 的特征维度不匹配："
+                    f"action={feature_dim}, state={state_dim}; "
+                    f"shared action={shared_agent.action_feature_dim}, "
+                    f"shared state={shared_agent.state_feature_dim}"
+                )
+            self.agent = shared_agent
 
         # 记录数据
         self.episode_rewards = []
@@ -344,6 +358,9 @@ class InstanceTrainer:
         self.episode_count = 0
         self.best_completion_time = float('inf')
         self.best_schedule_log = None
+        # 本算例独立记录历史最优时的共享网络快照，避免各 Trainer 相互覆盖。
+        self.best_policy_state = None
+        self.best_value_state = None
 
     def train_one_episode(self):
         """训练一个周期"""
@@ -390,7 +407,10 @@ class InstanceTrainer:
         if current_ct < self.best_completion_time:
             self.best_completion_time = current_ct
             self.best_schedule_log = copy.deepcopy(getattr(self.env, "schedule_log", []))
-            self.agent.update_best_params(current_ct)
+
+
+            self.best_policy_state = copy.deepcopy(self.agent.policy_net.state_dict())
+            self.best_value_state = copy.deepcopy(self.agent.value_net.state_dict())
 
         # 更新Visdom - 关键修改
         if self.episode_count == 0:
@@ -478,10 +498,11 @@ class InstanceTrainer:
 
         return total_reward, current_ct, pol_loss, val_loss
 
-    def save_results(self):
-        """保存训练结果"""
+    def save_results(self, output_dir="shared_training_results"):
+        """遵循原始 PPO.py，保存该算例历史最优 episode 对应的参数与调度记录。"""
         config_str = self.config_str
-        save_path = f"ppo_fajsp_model_{config_str}.pth"
+        os.makedirs(output_dir, exist_ok=True)
+        save_path = os.path.join(output_dir, f"ppo_fajsp_model_{config_str}.pth")
 
         # 获取环境中的任务信息用于甘特图
         kind_task_tuple = getattr(self.env, 'kind_task_tuple', [])
@@ -491,14 +512,14 @@ class InstanceTrainer:
 
         torch.save({
             'config': self.data_config,
-            'policy': self.agent.best_policy_state,
-            'value': self.agent.best_value_state,
+            # 与原始 PPO.py 一致：每个算例保留自己的历史最优权重。
+            'policy': self.best_policy_state,
+            'value': self.best_value_state,
             'reward': self.episode_rewards,
             'completion_times': self.completion_times,
-            'best_completion_time': self.agent.best_completion_time,
+            'best_completion_time': self.best_completion_time,
             'policy_losses': self.policy_losses,
             'value_losses': self.value_losses,
-            # 添加甘特图所需数据
             'best_schedule_log': self.best_schedule_log,
             'gantt_info': {
                 'kind_task_tuple': kind_task_tuple,
@@ -508,21 +529,28 @@ class InstanceTrainer:
             }
         }, save_path)
 
-        print(f"✅ {config_str}: 模型已保存, 最优完工时间: {self.agent.best_completion_time:.2f}")
+        print(f"✅ {config_str}: 模型已保存, 最优完工时间: {self.best_completion_time:.2f}")
         return save_path
 
 
 #########################################################
 # 轮训训练主程序
 #########################################################
-def train_round_robin(data_configs, total_episodes_per_instance=10000):
-    """轮训训练：每个算例训练1个周期，然后切换到下一个"""
+def train_round_robin(data_configs, total_episodes_per_instance=10000,
+                      output_dir="shared_training_results"):
+    """单一共享 PPO 的轮训：依次训练每个算例，统一使用 Actor/Critic/Optimizer。"""
+    if not data_configs:
+        raise ValueError("data_configs 不能为空")
+    if total_episodes_per_instance < 1:
+        raise ValueError("Episode 数量必须为正整数")
+    os.makedirs(output_dir, exist_ok=True)
 
     # 计算总训练周期数
     total_episodes = len(data_configs) * total_episodes_per_instance
 
     # 为每个算例创建visdom窗口 - 修改这里
     trainers = []
+    shared_agent = None
     for data_config in data_configs:
         config_str = f"{data_config[0]}_{data_config[1]}_{data_config[2]}_{data_config[3]}_{data_config[4]}_{data_config[5]}"
 
@@ -574,8 +602,15 @@ def train_round_robin(data_configs, total_episodes_per_instance=10000):
             # )
         }
 
-        trainer = InstanceTrainer(data_config, viz_windows)
+        trainer = InstanceTrainer(data_config, viz_windows,
+                                  shared_agent=shared_agent)
+        if shared_agent is None:
+            shared_agent = trainer.agent
+
         trainers.append(trainer)
+
+
+
 
     # 创建平均完工时间的Visdom窗口
     avg_ct_win = viz.line(
@@ -598,13 +633,12 @@ def train_round_robin(data_configs, total_episodes_per_instance=10000):
     # 添加轮次记录
     round_num = 0
     round_avg_ct_list = []
-
     # 显示初始进度条
     bar = '░' * bar_length
     print(f"全局进度: {bar} 0.0% (0/{total_episodes})", end='', flush=True)
 
-    # 获取第一个trainer的agent引用（假设所有trainer共享同一个PPO结构）
-    global_agent = trainers[0].agent if trainers else None
+    # 真实共享的 PPO 引用（所有 InstanceTrainer.agent 的对象身份相同）。
+    global_agent = shared_agent
 
     while True:
         if os.path.exists("STOP.txt"):
@@ -647,9 +681,10 @@ def train_round_robin(data_configs, total_episodes_per_instance=10000):
                 opts=dict(title='Round Average Completion Time', xlabel='Round', ylabel='Average CT')
             )
 
-            # 更新全局最优参数
+            # 完全沿用原始 PPO.py：以本轮训练 episode 的平均 Makespan 选择全局最优。
+            # 共享网络在本轮最后一个 Trainer 更新后保存当前参数快照。
             if global_agent:
-                updated = global_agent.update_global_best_params(round_avg_ct, round_num)
+                global_agent.update_global_best_params(round_avg_ct, round_num)
 
             # 更新进度条（在轮次结束后）
             progress = min(100, global_episode / total_episodes * 100)
@@ -659,13 +694,13 @@ def train_round_robin(data_configs, total_episodes_per_instance=10000):
 
             round_num += 1
 
-    # 保存所有结果
+    # 保留原始每个配置各一个 best 模型及训练日志的行为。
     for trainer in trainers:
-        trainer.save_results()
+        trainer.save_results(output_dir)
 
-    # 保存全局最优参数到单独的pth文件
+    # 全局模型仍在训练结束（或 STOP.txt 终止）后才实际写入磁盘。
     if global_agent and global_agent.global_best_policy_state is not None:
-        global_best_path = "ppo_fajsp_global_best.pth"
+        global_best_path = os.path.join(output_dir, "ppo_fajsp_global_best.pth")
         torch.save({
             'global_best_policy_state': global_agent.global_best_policy_state,
             'global_best_value_state': global_agent.global_best_value_state,
@@ -673,6 +708,7 @@ def train_round_robin(data_configs, total_episodes_per_instance=10000):
             'global_best_round': global_agent.global_best_round,
             'round_avg_ct_history': round_avg_ct_list
         }, global_best_path)
+        print(f"\n共享 PPO 全局最优模型已保存: {global_best_path}")
 
     total_time = time.time() - start_time
     print(f"轮训训练完成！总用时: {total_time:.1f}秒")
@@ -694,10 +730,21 @@ if __name__ == "__main__":
         [12, 6, 6, 12, 6, 2], [12, 6, 6, 12, 6, 4], [12, 6, 6, 12, 6, 6]
     ]
 
-    # 测试用的小列表
-    test_list = [[4, 2, 2, 4, 2, 2]]
-
-    # 开始轮训训练
-    trainers = train_round_robin(test_list, total_episodes_per_instance=100000)
+    # 默认用三个小算例检查真正的网络共享。正式实验使用 --configs all。
+    import argparse
+    parser = argparse.ArgumentParser(description="PPO 训练")
+    parser.add_argument('--configs', choices=['test', 'all'], default='test',
+                        help='test=3个小算例；all=C1-C27')
+    parser.add_argument('--episodes-per-instance', type=int, default=1000,
+                        help='每个算例训练的 Episode 数，独立于总 Episode 数')
+    parser.add_argument('--output-dir', default='shared_training_results')
+    args = parser.parse_args()
+    selected_configs = data_list if args.configs == 'all' else [data_list[0], data_list[1], data_list[2]]
+    trainers = train_round_robin(
+        selected_configs,
+        total_episodes_per_instance=args.episodes_per_instance,
+        output_dir=args.output_dir,
+    )
 
     print("\n所有算例轮训训练完成！")
+    # python -m agent.PPO --configs test --episodes-per-instance 1000 --output-dir results_C1
