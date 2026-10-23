@@ -133,7 +133,7 @@ class PPO:
         return False
 
     #########################################################
-    # 选择动作（选择概率最高的动作）
+    # 选择动作
     #########################################################
     def select_action(self, state, candidate_actions, candidate_actions_features):
         with torch.no_grad():
@@ -142,8 +142,6 @@ class PPO:
             if len(candidate_actions) == 0:
                 return None, None, None, None
 
-            # 选择概率最高的动作
-            # idx = torch.argmax(probs).item()
             # 依概率采样动作
             idx = torch.multinomial(probs, 1).item()
             action = candidate_actions[idx]
