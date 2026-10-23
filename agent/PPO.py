@@ -121,12 +121,6 @@ class PPO:
         self.best_value_state = None
         self.best_completion_time = float('inf')
 
-        # 添加全局最优参数记录（用于轮训训练）
-        self.global_best_policy_state = None
-        self.global_best_value_state = None
-        self.global_best_avg_ct = float('inf')
-        self.global_best_round = -1
-
     #########################################################
     # 更新最优参数
     #########################################################
@@ -135,19 +129,6 @@ class PPO:
             self.best_completion_time = completion_time
             self.best_policy_state = copy.deepcopy(self.policy_net.state_dict())
             self.best_value_state = copy.deepcopy(self.value_net.state_dict())
-            return True
-        return False
-
-    #########################################################
-    # 更新全局最优参数（用于轮训训练）
-    #########################################################
-    def update_global_best_params(self, avg_completion_time, round_num):
-        """更新全局最优参数（基于轮次平均完工时间）"""
-        if avg_completion_time < self.global_best_avg_ct:
-            self.global_best_avg_ct = avg_completion_time
-            self.global_best_policy_state = copy.deepcopy(self.policy_net.state_dict())
-            self.global_best_value_state = copy.deepcopy(self.value_net.state_dict())
-            self.global_best_round = round_num
             return True
         return False
 
@@ -356,14 +337,17 @@ class InstanceTrainer:
         self.value_losses = []
 
         self.episode_count = 0
-        self.best_completion_time = float('inf')
-        self.best_schedule_log = None
-        # 本算例独立记录历史最优时的共享网络快照，避免各 Trainer 相互覆盖。
-        self.best_policy_state = None
-        self.best_value_state = None
 
     def train_one_episode(self):
-        """训练一个周期"""
+        """训练一个周期：每个 Episode 都按当前参数重新生成实例。"""
+        # 不传 rng_seed；随机种子是否固定由 Instance_generate.py 决定。
+        # 只 reset() 会重复使用旧算例，因此这里必须重新创建环境。
+        M_p, M_a, product_count, kind_count, J_r, N_p = self.data_config
+        self.env = FAJSP_Environment(
+            M_p=M_p, M_a=M_a,
+            kind_count=kind_count, product_count=product_count,
+            J_r=J_r, N_p=N_p
+        )
         self.env.reset()
         state = self.env.current_state
         total_reward = 0
@@ -402,15 +386,6 @@ class InstanceTrainer:
         self.value_losses.append(val_loss)
 
         current_ct = float(self.env.completion_time)
-
-        # 更新最优记录
-        if current_ct < self.best_completion_time:
-            self.best_completion_time = current_ct
-            self.best_schedule_log = copy.deepcopy(getattr(self.env, "schedule_log", []))
-
-
-            self.best_policy_state = copy.deepcopy(self.agent.policy_net.state_dict())
-            self.best_value_state = copy.deepcopy(self.agent.value_net.state_dict())
 
         # 更新Visdom - 关键修改
         if self.episode_count == 0:
@@ -498,221 +473,84 @@ class InstanceTrainer:
 
         return total_reward, current_ct, pol_loss, val_loss
 
-    def save_results(self, output_dir="shared_training_results"):
-        """遵循原始 PPO.py，保存该算例历史最优 episode 对应的参数与调度记录。"""
-        config_str = self.config_str
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, f"ppo_fajsp_model_{config_str}.pth")
-
-        # 获取环境中的任务信息用于甘特图
-        kind_task_tuple = getattr(self.env, 'kind_task_tuple', [])
-        kind_task_tuple_r = getattr(self.env, 'kind_task_tuple_r', [])
-        kind_task_tuple_a = getattr(self.env, 'kind_task_tuple_a', [])
-        machine_tuple = getattr(self.env, 'machine_tuple', [])
-
-        torch.save({
-            'config': self.data_config,
-            # 与原始 PPO.py 一致：每个算例保留自己的历史最优权重。
-            'policy': self.best_policy_state,
-            'value': self.best_value_state,
-            'reward': self.episode_rewards,
-            'completion_times': self.completion_times,
-            'best_completion_time': self.best_completion_time,
-            'policy_losses': self.policy_losses,
-            'value_losses': self.value_losses,
-            'best_schedule_log': self.best_schedule_log,
-            'gantt_info': {
-                'kind_task_tuple': kind_task_tuple,
-                'kind_task_tuple_r': kind_task_tuple_r,
-                'kind_task_tuple_a': kind_task_tuple_a,
-                'machine_tuple': machine_tuple
-            }
-        }, save_path)
-
-        print(f"✅ {config_str}: 模型已保存, 最优完工时间: {self.best_completion_time:.2f}")
-        return save_path
 
 
 #########################################################
-# 轮训训练主程序
+# 随机抽样训练主程序
 #########################################################
-def train_round_robin(data_configs, total_episodes_per_instance=10000,
-                      output_dir="shared_training_results"):
-    """单一共享 PPO 的轮训：依次训练每个算例，统一使用 Actor/Critic/Optimizer。"""
+def train_random_sampling(data_configs, total_episodes=1000,
+                          output_dir="shared_training_results"):
+    """每个 Episode 从配置表有放回随机抽取一组，并重新生成该组的算例。"""
     if not data_configs:
         raise ValueError("data_configs 不能为空")
-    if total_episodes_per_instance < 1:
-        raise ValueError("Episode 数量必须为正整数")
+    if total_episodes < 1:
+        raise ValueError("total_episodes 必须是正整数")
     os.makedirs(output_dir, exist_ok=True)
 
-    # 计算总训练周期数
-    total_episodes = len(data_configs) * total_episodes_per_instance
-
-    # 为每个算例创建visdom窗口 - 修改这里
+    # 每种参数有自己的训练统计和 Visdom 曲线；所有配置共享同一个 PPO。
     trainers = []
     shared_agent = None
     for data_config in data_configs:
-        config_str = f"{data_config[0]}_{data_config[1]}_{data_config[2]}_{data_config[3]}_{data_config[4]}_{data_config[5]}"
-
-        # 创建窗口时使用一个隐藏的初始点
+        config_str = "_".join(map(str, data_config))
         viz_windows = {
-            # 'reward_win': viz.line(
-            #     X=np.array([0]),  # Visdom要求至少有一个点
-            #     Y=np.array([0]),  # 初始值设为0，但后面会覆盖
-            #     opts=dict(
-            #         title=f'Reward - {config_str}',
-            #         xlabel='Episode',
-            #         ylabel='Reward',
-            #         env='FAJSP_PPO_Training',
-            #         showlegend=False  # 不显示图例
-            #     )
-            # ),
             'ct_win': viz.line(
-                X=np.array([0]),  # Visdom要求至少有一个点
-                Y=np.array([0]),  # 初始值设为0，但后面会覆盖
+                X=np.array([0]), Y=np.array([0]),
                 opts=dict(
                     title=f'Completion Time - {config_str}',
-                    xlabel='Episode',
-                    ylabel='Completion Time',
-                    env='FAJSP_PPO_Training',
-                    showlegend=False  # 不显示图例
+                    xlabel='Episode', ylabel='Completion Time',
+                    env='FAJSP_PPO_Training', showlegend=False
                 )
             )
-            # 'policy_loss_win': viz.line(
-            #     X=np.array([0]),  # Visdom要求至少有一个点
-            #     Y=np.array([0]),  # 初始值设为0，但后面会覆盖
-            #     opts=dict(
-            #         title=f'Policy Loss - {config_str}',
-            #         xlabel='Episode',
-            #         ylabel='Loss',
-            #         env='FAJSP_PPO_Training',
-            #         showlegend=False
-            #     )
-            # ),
-            # 'value_loss_win': viz.line(
-            #     X=np.array([0]),  # Visdom要求至少有一个点
-            #     Y=np.array([0]),  # 初始值设为0，但后面会覆盖
-            #     opts=dict(
-            #         title=f'Value Loss - {config_str}',
-            #         xlabel='Episode',
-            #         ylabel='Loss',
-            #         env='FAJSP_PPO_Training',
-            #         showlegend=False
-            #     )
-            # )
         }
-
         trainer = InstanceTrainer(data_config, viz_windows,
                                   shared_agent=shared_agent)
         if shared_agent is None:
             shared_agent = trainer.agent
-
         trainers.append(trainer)
 
-
-
-
-    # 创建平均完工时间的Visdom窗口
-    avg_ct_win = viz.line(
-        X=np.array([0]),
-        Y=np.array([0]),
-        opts=dict(
-            title='Round Average Completion Time',
-            xlabel='Round',
-            ylabel='Average CT',
-            env='FAJSP_PPO_Training',
-            showlegend=False
-        )
-    )
-
-    # 轮训训练
     start_time = time.time()
-    global_episode = 0
+    sampled_episodes = []
     bar_length = 40
+    print(f"从 {len(data_configs)} 组配置中有放回随机抽样，计划训练 {total_episodes} 个 Episode")
 
-    # 添加轮次记录
-    round_num = 0
-    round_avg_ct_list = []
-    # 显示初始进度条
-    bar = '░' * bar_length
-    print(f"全局进度: {bar} 0.0% (0/{total_episodes})", end='', flush=True)
-
-    # 真实共享的 PPO 引用（所有 InstanceTrainer.agent 的对象身份相同）。
-    global_agent = shared_agent
-
-    while True:
-        if os.path.exists("STOP.txt"):
+    # 无轮次、无顺序遍历：每个 Episode 独立调用一次 random.choice。
+    for episode in range(1, total_episodes + 1):
+        if os.path.exists('STOP.txt'):
+            print("\n检测到 STOP.txt，提前结束训练")
             break
+        trainer = random.choice(trainers)
+        # 内部重新创建 FAJSP_Environment，而不是只调用 reset()。
+        _, current_ct, _, _ = trainer.train_one_episode()
+        sampled_episodes.append((episode, trainer.config_str, float(current_ct)))
 
-        all_done = all(t.episode_count >= total_episodes_per_instance for t in trainers)
-        if all_done:
-            print()
-            break
+        progress = 100 * episode / total_episodes
+        filled = int(bar_length * episode / total_episodes)
+        bar = '█' * filled + '░' * (bar_length - filled)
+        print(f"\r全局进度: {bar} {progress:.1f}% ({episode}/{total_episodes})",
+              end='', flush=True)
+    print()
 
-        # 每个轮次开始前重置计数器
-        round_total_ct = 0
-        round_instance_count = 0
+    # 不生成每组配置对应的模型文件；只保存抽样记录和最终共享模型。
+    import csv
+    with open(os.path.join(output_dir, 'ppo_episode_sampling.csv'), 'w',
+              newline='', encoding='utf-8-sig') as f:
+        writer = csv.writer(f)
+        writer.writerow(['episode', 'config', 'makespan'])
+        writer.writerows(sampled_episodes)
 
-        # 轮流训练：每个算例训练1个周期
-        for trainer in trainers:
-            if trainer.episode_count >= total_episodes_per_instance:
-                continue
+    # 不跨规模比较 Makespan；仅保存最终共享权重。
+    # 保存实际完成训练后的同一套 Actor、Critic 和优化器。
+    torch.save({
+        'policy': shared_agent.policy_net.state_dict(),
+        'value': shared_agent.value_net.state_dict(),
+        'optimizer': shared_agent.optimizer.state_dict(),
+        'training_mode': 'random',
+        'configs': data_configs,
+        'episodes_trained': len(sampled_episodes),
+    }, os.path.join(output_dir, 'ppo_fajsp_final.pth'))
 
-            # 训练一个周期
-            total_reward, current_ct, pol_loss, val_loss = trainer.train_one_episode()
-
-            # 累计本轮次的总完工时间
-            round_total_ct += current_ct
-            round_instance_count += 1
-
-            global_episode += 1
-
-        # 计算本轮次的平均完工时间（在所有算例都训练完一个周期后）
-        if round_instance_count > 0:
-            round_avg_ct = round_total_ct / round_instance_count
-            round_avg_ct_list.append(round_avg_ct)
-
-            # 更新Visdom
-            viz.line(
-                X=np.array([round_num]),
-                Y=np.array([round_avg_ct]),
-                win=avg_ct_win,
-                update='append',
-                opts=dict(title='Round Average Completion Time', xlabel='Round', ylabel='Average CT')
-            )
-
-            # 完全沿用原始 PPO.py：以本轮训练 episode 的平均 Makespan 选择全局最优。
-            # 共享网络在本轮最后一个 Trainer 更新后保存当前参数快照。
-            if global_agent:
-                global_agent.update_global_best_params(round_avg_ct, round_num)
-
-            # 更新进度条（在轮次结束后）
-            progress = min(100, global_episode / total_episodes * 100)
-            filled_length = int(bar_length * progress / 100)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            print(f"\r全局进度: {bar} {progress:.1f}% ({global_episode}/{total_episodes})", end='', flush=True)
-
-            round_num += 1
-
-    # 保留原始每个配置各一个 best 模型及训练日志的行为。
-    for trainer in trainers:
-        trainer.save_results(output_dir)
-
-    # 全局模型仍在训练结束（或 STOP.txt 终止）后才实际写入磁盘。
-    if global_agent and global_agent.global_best_policy_state is not None:
-        global_best_path = os.path.join(output_dir, "ppo_fajsp_global_best.pth")
-        torch.save({
-            'global_best_policy_state': global_agent.global_best_policy_state,
-            'global_best_value_state': global_agent.global_best_value_state,
-            'global_best_avg_ct': global_agent.global_best_avg_ct,
-            'global_best_round': global_agent.global_best_round,
-            'round_avg_ct_history': round_avg_ct_list
-        }, global_best_path)
-        print(f"\n共享 PPO 全局最优模型已保存: {global_best_path}")
-
-    total_time = time.time() - start_time
-    print(f"轮训训练完成！总用时: {total_time:.1f}秒")
-
+    print(f"随机抽样训练结束，完成 {len(sampled_episodes)} 个 Episode，"
+          f"总用时 {time.time() - start_time:.1f} 秒")
     return trainers
 
 
@@ -730,21 +568,14 @@ if __name__ == "__main__":
         [12, 6, 6, 12, 6, 2], [12, 6, 6, 12, 6, 4], [12, 6, 6, 12, 6, 6]
     ]
 
-    # 默认用三个小算例检查真正的网络共享。正式实验使用 --configs all。
     import argparse
-    parser = argparse.ArgumentParser(description="PPO 训练")
-    parser.add_argument('--configs', choices=['test', 'all'], default='test',
-                        help='test=3个小算例；all=C1-C27')
-    parser.add_argument('--episodes-per-instance', type=int, default=1000,
-                        help='每个算例训练的 Episode 数，独立于总 Episode 数')
-    parser.add_argument('--output-dir', default='shared_training_results')
+    parser = argparse.ArgumentParser(description="PPO：27组参数随机抽样、每轮新建算例")
+    parser.add_argument('--episodes', type=int, default=1000,
+                        help='总 Episode 数（默认1000）')
+    parser.add_argument('--output-dir', default='shared_training_results',
+                        help='训练结果输出目录')
     args = parser.parse_args()
-    selected_configs = data_list if args.configs == 'all' else [data_list[0], data_list[1], data_list[2]]
-    trainers = train_round_robin(
-        selected_configs,
-        total_episodes_per_instance=args.episodes_per_instance,
-        output_dir=args.output_dir,
-    )
+    train_random_sampling(data_list, total_episodes=args.episodes,
+                          output_dir=args.output_dir)
 
-    print("\n所有算例轮训训练完成！")
-    # python -m agent.PPO --configs test --episodes-per-instance 1000 --output-dir results_C1
+    # 启动：python -m agent.PPO --episodes 1000
