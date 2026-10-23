@@ -175,29 +175,52 @@ class Instance():
         print("写入完成")
 
 if __name__ == '__main__':
-        M_p = [16]
-        M_a = [10]
-        kind_count = [16]
-        product_count = [10]
-        J_r = [10]
-        N_p = [8,10,12]
+        # M_p = [4,8,12]
+        # M_a = [2,4,6]
+        # kind_count = [4,8,12]
+        # product_count = [2,4,6]
+        # J_r = [2,4,6]
+        # N_p = [2,4,6]
+        # data_list = []
+        # for x in range(3):
+        #     mp = M_p[x]
+        #     ma = M_a[x]
+        #     for y in range(3):
+        #         pc = product_count[y]
+        #         kc = kind_count[y]
+        #         jr = J_r[y]
+        #         for z in range(3):
+        #             n_p = N_p[z]
+        #             data_list.append([mp,ma,pc,kc,jr,n_p])
+        # print(data_list)
+        # print(len(data_list))
+        # for data in data_list:
+        #     instance = Instance(M_p=data[0], M_a=data[1],product_count=data[2], kind_count=data[3],  J_r=data[4], N_p=data[5])
+        #     instance.write_file()
+
+        M_p = [14]
+        M_a = [8]
+        kind_count = [14]
+        product_count = [8]
+        J_r = [8]
+        N_p = [8, 10, 12]
         data_list = []
-        x=0
-        mp = M_p[x]
-        ma = M_a[x]
-        pc = product_count[0]
-        kc = kind_count[0]
-        jr = J_r[0]
-        for y in range(len(N_p)):
-            n_p = N_p[y]
-            data_list.append([mp,ma,pc,kc,jr,n_p])
+        for x in range(len(M_p)):
+            mp = M_p[x]
+            ma = M_a[x]
+            for y in range(len(kind_count)):
+                pc = product_count[y]
+                kc = kind_count[y]
+                jr = J_r[y]
+                for z in range(len(N_p)):
+                    n_p = N_p[z]
+                    data_list.append([mp, ma, pc, kc, jr, n_p, ])
         print(data_list)
         print(len(data_list))
         for data in data_list:
-            instance = Instance(M_p=data[0], M_a=data[1],product_count=data[2], kind_count=data[3],  J_r=data[4], N_p=data[5])
+            instance = Instance(M_p=data[0], M_a=data[1], product_count=data[2], kind_count=data[3], J_r=data[4],
+                                N_p=data[5])
             instance.write_file()
-
-
 
         # datalist=[[4, 2, 2, 4, 2, 2], [4, 2, 2, 4, 2, 4], [4, 2, 2, 4, 2, 6], [4, 2, 4, 8, 4, 2], [4, 2, 4, 8, 4, 4],
         #  [4, 2, 4, 8, 4, 6], [4, 2, 6, 12, 6, 2], [4, 2, 6, 12, 6, 4], [4, 2, 6, 12, 6, 6], [8, 4, 2, 4, 2, 2],
