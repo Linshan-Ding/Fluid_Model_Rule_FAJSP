@@ -20,8 +20,8 @@ class Instance():
         rng_seed: 随机种子（默认0，与原实现一致）
         instance_name: 算例文件夹名（默认按参数拼接，与原实现一致）
         """
-        seed(rng_seed)  # 固定随机种子
-        np.random.seed(rng_seed)
+        # seed(rng_seed)  # 固定随机种子
+        # np.random.seed(rng_seed)
         self.pt_range = tuple(pt_range)
         self.alpha_range = tuple(alpha_range)
         self.elig_mode = elig_mode
