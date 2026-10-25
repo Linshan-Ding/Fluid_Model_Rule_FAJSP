@@ -20,8 +20,8 @@ class Instance():
         rng_seed: 随机种子（默认0，与原实现一致）
         instance_name: 算例文件夹名（默认按参数拼接，与原实现一致）
         """
-        # seed(rng_seed)  # 固定随机种子
-        # np.random.seed(rng_seed)
+        seed(rng_seed)  # 固定随机种子
+        np.random.seed(rng_seed)
         self.pt_range = tuple(pt_range)
         self.alpha_range = tuple(alpha_range)
         self.elig_mode = elig_mode
@@ -198,12 +198,12 @@ if __name__ == '__main__':
         #     instance = Instance(M_p=data[0], M_a=data[1],product_count=data[2], kind_count=data[3],  J_r=data[4], N_p=data[5])
         #     instance.write_file()
 
-        M_p = [14]
-        M_a = [8]
-        kind_count = [14]
-        product_count = [8]
-        J_r = [8]
-        N_p = [8, 10, 12]
+        M_p = [5]
+        M_a = [3]
+        kind_count = [5]
+        product_count = [3]
+        J_r = [3]
+        N_p = [2, 4, 6]
         data_list = []
         for x in range(len(M_p)):
             mp = M_p[x]
