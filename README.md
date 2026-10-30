@@ -16,7 +16,7 @@ Class_FAJSP/
   assemble_method.py     BOM结构与装配序列生成工具
 Class_AJSP/              装配作业车间(AJSP)相关类
 env/
-  env.py                 MDP仿真环境（多视图状态88x88、候选动作、流体归一化奖励）
+  env.py                 MDP仿真环境（多视图状态185x185、候选动作、流体归一化奖励）
 agent/
   PPO.py                 PPO训练主程序（含visdom可视化, 本地开发用）
   A2C.py A3C.py AC.py DQN.py DDQN.py   对比RL算法
@@ -54,7 +54,7 @@ python schedule_rule/schedule_rule.py       # 调度规则基线
 python agent/PPO.py                         # PPO训练（需先启动 python -m visdom.server）
 ```
 
-注意: 跨算例轮询训练前确保状态矩阵维度统一（当前统一padding到88x88）。
+注意: 跨算例轮询训练前确保状态矩阵维度统一（当前统一padding到185x185）。
 
 ### 2. D1-D12 OOD泛化实验（论文修订新增）
 
